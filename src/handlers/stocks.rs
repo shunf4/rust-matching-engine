@@ -68,26 +68,17 @@ use crate::schema::*;
 #[derive(Debug, Deserialize, Insertable)]
 #[table_name="new_stocks"]
 pub struct IPONewStockModel {
+    pub id: i32,
     pub offer_circ: i64,
     pub offer_price: i32,
     pub created_at: chrono::NaiveDateTime,
     pub offer_unfulfilled: i64,
 }
 
-impl From<IPOModel> for IPONewStockModel {
-    fn from(ipo: IPOModel) -> IPONewStockModel {
-        IPONewStockModel {
-            offer_circ: ipo.offer_circ,
-            offer_price: ipo.offer_price,
-            offer_unfulfilled: ipo.offer_circ,
-            created_at: chrono::Utc::now().naive_utc(),
-        }
-    }
-}
-
 impl IPONewStockModel {
-    fn from_borrowed_ipo(ipo: &IPOModel) -> IPONewStockModel {
+    fn from_borrowed_ipo_and_id(ipo: &IPOModel, id: i32) -> IPONewStockModel {
         IPONewStockModel {
+            id,
             offer_circ: ipo.offer_circ,
             offer_price: ipo.offer_price,
             offer_unfulfilled: ipo.offer_circ,
@@ -118,17 +109,14 @@ impl IPOStockModel {
 ///////////////
 
 pub fn ipo_stock(
-    ipo_stock: web::Json<IPOModel>,
+    ipo: web::Json<IPOModel>,
     curr_user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
-    let ipo_stock : IPOModel = ipo_stock.into_inner();
-    let ipo_new_stock = IPONewStockModel::from_borrowed_ipo(&ipo_stock);
-    let stock = IPOStockModel::from_ipo_and_user(&ipo_stock, &curr_user);
    
     web::block(
         move || {
-            ipo_stock_query(ipo_new_stock, stock, pool)
+            ipo_stock_query(ipo.into_inner(), curr_user, pool)
         }
     ).then(
         move |res: Result<(), BlockingError<EngineError>>|
@@ -142,7 +130,7 @@ pub fn ipo_stock(
     )
 }
 
-fn ipo_stock_query(ipo_stock: IPONewStockModel, stock: IPOStockModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
+fn ipo_stock_query(ipo: IPOModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl::*;
     use crate::schema::new_stocks::dsl::*;
 
@@ -153,19 +141,22 @@ fn ipo_stock_query(ipo_stock: IPONewStockModel, stock: IPOStockModel, pool: web:
         // 保证原子性
         // 第一步：建立 stock，有名字重复则马上失败
         let query_stock = diesel::insert_into(stocks)
-            .values(stock);
+            .values(IPOStockModel::from_ipo_and_user(&ipo, &user));
 
         debug!("New stock stock SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query_stock));
 
-        query_stock.execute(conn)
+        let new_id = query_stock.get_result::<Stocks>(conn)
+            .optional()
             .map_err(|db_err| {
                 debug!("Database insert error when registering: {}", db_err);
                 EngineError::InternalError(format!("数据库插入股票错误，可能是股票重名所致：{}", db_err))
-            })?;
+            })?
+            .ok_or_else(|| EngineError::InternalError(format!("数据库插入股票后无返回值错误")))?
+            .id;
 
         // 第二步：建立 ipo_stock
         let query_ipo_stock = diesel::insert_into(new_stocks)
-            .values(ipo_stock);
+            .values(IPONewStockModel::from_borrowed_ipo_and_id(&ipo, new_id));
 
         debug!("New stock new_stock SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query_ipo_stock));
 
@@ -184,7 +175,7 @@ fn ipo_stock_query(ipo_stock: IPONewStockModel, stock: IPOStockModel, pool: web:
 
 
 pub fn list_stock(
-    stock_id: web::Json<u32>,
+    stock_id: web::Path<u32>,
     curr_user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -241,16 +232,13 @@ fn list_stock_query(stock_id: u32, curr_user: RememberUserModel, pool: web::Data
 
     debug!("List stock list_stock SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query_list_stock));
 
-    let result = query_list_stock.get_result::<(i32, i32, String, bool, Option<chrono::NaiveDateTime>)>(conn)
+    query_list_stock.get_result::<(i32, i32, String, bool, Option<chrono::NaiveDateTime>)>(conn)
         .map_err(|db_err| {
             debug!("Database insert error when registering: {}", db_err);
             EngineError::InternalError(format!("数据库插入上市股票错误：{}", db_err))
-        })?.0;
+        })?;
 
-    match result {
-        1 => Ok(()),
-        _ => Err(EngineError::InternalError(format!("数据库插入上市股票，更改数并非 1：{}", result)))
-    }
+    Ok(())
 }
 
 
