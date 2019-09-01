@@ -1,0 +1,28 @@
+[package]
+name = "rust_matching_engine"
+version = "0.1.0"
+authors = ["shunf4 <shun1048576@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-identity = "0.1.0"
+actix-web = "1.0.3"
+listenfd = "0.3"
+diesel = { version = "1.4.2", features = ["postgres","uuidv07", "r2d2", "chrono"] }
+dotenv = "0.14.1"
+env_logger = "0.6"
+r2d2 = "0.8.5"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+uuid = { version = "0.7", features = ["serde", "v4"] }
+chrono = { version = "0.4.6", features = ["serde"] }
+futures = "0.1.28"
+ring = "^0.14.6"
+data-encoding = "^2.1"
+failure = "0.1.5"
+derive_more = "0.15.0"
+log = "0.4.8"
+http = "0.1.18"
