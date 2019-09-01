@@ -34,14 +34,14 @@ impl Deals {
 
 
 
-#[derive(Queryable, Insertable)]
+#[derive(Queryable, Insertable, Serialize)]
 #[table_name="stocks"]
 pub struct Stocks {
     pub id: i32,
+    pub issuer_id: i32,
     pub name: String,
     pub into_market: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub into_market_at: chrono::NaiveDateTime,
+    pub into_market_at: Option<chrono::NaiveDateTime>,
 }
 
 impl Stocks {

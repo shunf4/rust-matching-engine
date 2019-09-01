@@ -9,10 +9,10 @@ CREATE TABLE users (
 
 CREATE TABLE stocks (
     id SERIAL PRIMARY KEY,
-    name VARCHAR NOT NULL,
+    issuer_id SERIAL REFERENCES users(id),
+    name VARCHAR NOT NULL UNIQUE,
     into_market BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL,
-    into_market_at TIMESTAMP NOT NULL
+    into_market_at TIMESTAMP
 );
 
 CREATE TABLE new_stocks (

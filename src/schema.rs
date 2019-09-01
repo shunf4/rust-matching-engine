@@ -23,10 +23,10 @@ table! {
 table! {
     stocks (id) {
         id -> Int4,
+        issuer_id -> Int4,
         name -> Varchar,
         into_market -> Bool,
-        created_at -> Timestamp,
-        into_market_at -> Timestamp,
+        into_market_at -> Nullable<Timestamp>,
     }
 }
 
@@ -73,6 +73,7 @@ table! {
 
 joinable!(deals -> stocks (stock_id));
 joinable!(new_stocks -> stocks (id));
+joinable!(stocks -> users (issuer_id));
 joinable!(user_ask_entrusts -> stocks (stock_id));
 joinable!(user_ask_entrusts -> users (user_id));
 joinable!(user_bid_entrusts -> stocks (stock_id));

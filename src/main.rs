@@ -14,7 +14,6 @@ extern crate env_logger;
 pub mod schema;
 pub mod models;
 pub mod hash;
-pub mod test;
 pub mod errors;
 pub mod handlers;
 pub mod common;
@@ -93,15 +92,23 @@ fn main() -> std::io::Result<()> {
                     EngineError::BadRequest(format!("解析路径中整数错误：{}。请检查数据。", err)).into()
                 })
             }))   // 给 路径参数 Parser 添加配置
+            .data(web::Query::<crate::handlers::PagingModel>::configure(|cfg| {
+                cfg.error_handler(|err, _| {
+                    EngineError::BadRequest(format!("解析 Query String 中翻页数据错误：{}。请检查数据。", err)).into()
+                })
+            }))   // 给 请求参数 Query Parser 添加配置
             .service(
-                web::scope("/stock-api")
+                web::scope("/stock-api/v1")
                     .service(
-                        handlers::users::make_user_scope()
+                        handlers::users::make_scope()
                     )
                     .service(
                         web::resource("/auth")
                             .route(web::post().to_async(handlers::users::login))
                             .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+                    )
+                    .service(
+                        handlers::stocks::make_scope()
                     )
                     .default_service(
                         web::route().to(

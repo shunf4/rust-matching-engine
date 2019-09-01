@@ -6,7 +6,7 @@ use http::StatusCode;
 #[derive(Serialize)]
 pub struct EngineErrorModel {
     status: u16,
-    message: String,
+    error: String,
 }
 
 #[derive(Debug, Display)]
@@ -38,33 +38,39 @@ impl error::ResponseError for EngineError {
             EngineError::InternalError(m) => 
                 HttpResponse::InternalServerError()
                     .json(EngineErrorModel {
-                        message: m.to_owned(),
+                        error: m.to_owned(),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16()
                     }),
             EngineError::BadRequest(m) => 
                 HttpResponse::BadRequest()
                     .json(EngineErrorModel {
-                        message: m.to_owned(),
+                        error: m.to_owned(),
                         status: StatusCode::BAD_REQUEST.as_u16()
                     }),
             EngineError::Unauthorized(m) => 
                 HttpResponse::Unauthorized()
                     .json(EngineErrorModel {
-                        message: m.to_owned(),
+                        error: m.to_owned(),
                         status: StatusCode::UNAUTHORIZED.as_u16()
                     }),
             EngineError::MethodNotAllowed(m) => 
                 HttpResponse::MethodNotAllowed()
                     .json(EngineErrorModel {
-                        message: m.to_owned(),
+                        error: m.to_owned(),
                         status: StatusCode::METHOD_NOT_ALLOWED.as_u16()
                     }),
             EngineError::NotFound(m) => 
                 HttpResponse::NotFound()
                     .json(EngineErrorModel {
-                        message: m.to_owned(),
+                        error: m.to_owned(),
                         status: StatusCode::NOT_FOUND.as_u16()
                     }),
         }
+    }
+}
+
+impl From<diesel::result::Error> for EngineError {
+    fn from(e: diesel::result::Error) -> EngineError {
+        EngineError::InternalError(format!("数据库事务错误：{}", e))
     }
 }

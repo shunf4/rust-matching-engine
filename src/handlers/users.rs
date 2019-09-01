@@ -1,5 +1,5 @@
 use actix_web::{
-    web, Error, HttpRequest, HttpResponse
+    web, Error, HttpRequest, HttpResponse, FromRequest, dev::Payload
 };
 use actix_web::error::BlockingError;
 use actix_identity::Identity;
@@ -13,14 +13,15 @@ use std::sync::Arc;
 use diesel::PgConnection;
 use diesel::prelude::*;
 
+use crate::hash::hash_password;
 
-pub fn make_user_scope() -> actix_web::Scope {
+
+pub fn make_scope() -> actix_web::Scope {
     web::scope("/users")
         .service(
             web::resource("/")  // Scope 会自动加尾 /，所以 /users 无法匹配
                 .route(web::get().to(|| Err::<(), EngineError>(EngineError::BadRequest(format!("错误：您没有权限获取用户列表。")))))
-                .route(web::post().to(|| Err::<(), EngineError>(EngineError::BadRequest(format!("错误：您没有权限编辑用户列表。")))))
-                .route(web::put().to_async(register))   // 注册
+                .route(web::post().to_async(register))   // 注册
                 .to(|| HttpResponse::MethodNotAllowed())
         )
         .service(
@@ -269,10 +270,30 @@ pub struct LoginModel {
     pub password: String
 }
 
-#[derive(Debug, Clone, Queryable, Serialize)]
+#[derive(Debug, Clone, Queryable, Serialize, Deserialize)]
 pub struct RememberUserModel {
     pub id: i32,
     pub name: String,
+}
+
+// 将 RememberUserModel 变成一个提取器
+impl FromRequest for RememberUserModel {
+    type Config = ();
+    type Error = EngineError;
+    type Future = Result<RememberUserModel, EngineError>;
+
+    fn from_request(req: &HttpRequest, pl: &mut Payload) -> Self::Future {
+        if let Some(identity) = Identity::from_request(req, pl).
+                                                    map_err(
+                                                        |err| EngineError::InternalError(format!("服务端提取 Cookie 错误：{}", err))
+                                                    )?.identity() {
+            let user: RememberUserModel = serde_json::from_str(&identity).map_err(
+                |json_err| EngineError::InternalError(format!("服务端从 Cookie 获取到的 JSON 错误：{}", json_err))
+            )?;
+            return Ok(user);
+        }
+        Err(EngineError::Unauthorized(format!("未授权：您未登录！")))
+    }
 }
 
 pub fn login(
