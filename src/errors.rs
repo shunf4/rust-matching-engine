@@ -16,6 +16,8 @@ pub enum EngineError {
     #[display(fmt = "{}", _0)]
     BadRequest(String),
     #[display(fmt = "{}", _0)]
+    Insufficient(crate::handlers::orders::OrderResult),
+    #[display(fmt = "{}", _0)]
     Unauthorized(String),
     #[display(fmt = "{}", _0)]
     MethodNotAllowed(String),
@@ -53,6 +55,9 @@ impl error::ResponseError for EngineError {
                         error: m.to_owned(),
                         status: StatusCode::UNAUTHORIZED.as_u16()
                     }),
+            EngineError::Insufficient(m) => 
+                HttpResponse::NotAcceptable()
+                    .json(m),
             EngineError::MethodNotAllowed(m) => 
                 HttpResponse::MethodNotAllowed()
                     .json(EngineErrorModel {

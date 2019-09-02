@@ -110,6 +110,11 @@ fn main() -> std::io::Result<()> {
                     .service(
                         handlers::stocks::make_scope()
                     )
+                    .service(
+                        web::resource("/recharge")
+                            .route(web::post().to_async(handlers::recharge::recharge))
+                            .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+                    )
                     .default_service(
                         web::route().to(
                             || Err::<(), EngineError>(EngineError::NotFound(format!("错误：未找到资源。")))

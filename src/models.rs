@@ -3,11 +3,11 @@ use crate::schema::*;
 #[derive(Queryable, Insertable)]
 #[table_name="users"]
 pub struct User {
-    pub id: i32,
+    pub id: i64,
     pub password_hashed: String,
     pub name: String,
     pub created_at: chrono::NaiveDateTime,
-    pub balance: i32
+    pub balance: i64
 }
 
 impl User {
@@ -18,17 +18,17 @@ impl User {
 
 #[derive(Queryable, Insertable)]
 #[table_name="deals"]
-pub struct Deals {
-    pub id: i32,
-    pub buy_user_id: i32,
-    pub sell_user_id: i32,
-    pub stock_id: i32,
+pub struct Deal {
+    pub id: i64,
+    pub buy_user_id: i64,
+    pub sell_user_id: Option<i64>,  // 当是 NULL 时，表示是购买发行新股
+    pub stock_id: i64,
     pub price: i32,
     pub amount: i64,
     pub created_at: chrono::NaiveDateTime
 }
 
-impl Deals {
+impl Deal {
 
 }
 
@@ -36,66 +36,68 @@ impl Deals {
 
 #[derive(Queryable, Insertable, Serialize)]
 #[table_name="stocks"]
-pub struct Stocks {
-    pub id: i32,
-    pub issuer_id: i32,
+pub struct Stock {
+    pub id: i64,
     pub name: String,
     pub into_market: bool,
     pub into_market_at: Option<chrono::NaiveDateTime>,
 }
 
-impl Stocks {
+impl Stock {
 
 }
 
 
 
-#[derive(Queryable, Insertable)]
+#[derive(Queryable, Insertable, AsChangeset, Identifiable)]
 #[table_name="new_stocks"]
-pub struct NewStocks {
-    pub id: i32,
+pub struct NewStock {
+    pub id: i64,
+    pub issuer_id: i64,
     pub offer_circ: i64,
     pub offer_price: i32,
     pub offer_unfulfilled: i64,
     pub created_at: chrono::NaiveDateTime
 }
 
-impl NewStocks {
+impl NewStock {
 
 }
 
 
 
 
-#[derive(Queryable, Insertable)]
-#[table_name="user_ask_entrusts"]
-pub struct AskEntrust {
-    pub id: i32,
-    pub user_id: i32,
-    pub stock_id: i32,
+#[derive(Queryable, Insertable, AsChangeset, Identifiable)]
+#[table_name="user_ask_orders"]
+pub struct AskOrder {
+    pub id: i64,
+    pub user_id: i64,
+    pub stock_id: i64,
     pub price: i32,
-    pub amount: i64,
+    pub volume: i64,
+    pub unfulfilled: i64,
     pub created_at: chrono::NaiveDateTime
 }
 
-impl AskEntrust {
+impl AskOrder {
 
 }
 
 
 
-#[derive(Queryable, Insertable)]
-#[table_name="user_bid_entrusts"]
-pub struct BidEntrust {
-    pub id: i32,
-    pub user_id: i32,
-    pub stock_id: i32,
+#[derive(Queryable, Insertable, AsChangeset, Identifiable)]
+#[table_name="user_bid_orders"]
+pub struct BidOrder {
+    pub id: i64,
+    pub user_id: i64,
+    pub stock_id: i64,
     pub price: i32,
-    pub amount: i64,
+    pub volume: i64,
+    pub unfulfilled: i64,
     pub created_at: chrono::NaiveDateTime
 }
 
-impl BidEntrust {
+impl BidOrder {
 
 }
 

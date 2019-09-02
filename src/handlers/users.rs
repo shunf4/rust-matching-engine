@@ -25,13 +25,18 @@ pub fn make_scope() -> actix_web::Scope {
                 .to(|| HttpResponse::MethodNotAllowed())
         )
         .service(
-            web::resource("/{id}")
-                .route(web::get().to_async(get_user))      // 获取用户
+            web::resource("/me")
+                .route(web::get().to_async(get_user_me))      // 获取自己
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
         )
         .service(
             web::resource("/by-name/{name}")
                 .route(web::get().to_async(get_user_by_name))      // 获取用户
+                .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+        )
+        .service(
+            web::resource("/{id}")
+                .route(web::get().to_async(get_user))      // 获取用户
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
         )
 }
@@ -62,7 +67,7 @@ pub struct RegisteringUserModel {
     pub password_hashed: String,
     pub name: String,
     pub created_at: chrono::NaiveDateTime,
-    pub balance: i32
+    pub balance: i64
 }
 
 impl Into<RegisteringUserModel> for RegisterModel {
@@ -128,7 +133,7 @@ fn register_check_duplicate_query(reg_data: RegisterModelWithoutPassword, pool: 
         query
             .get_result::<String>(conn)
             .optional()
-            .map_err(|db_err| EngineError::InternalError(format!("数据库插入错误：{}", db_err)))? {
+            .map_err(|db_err| EngineError::InternalError(format!("数据库查询错误：{}", db_err)))? {
         return Err(EngineError::BadRequest("注册失败，已有重名用户。".to_owned()));
     }
 
@@ -159,10 +164,10 @@ fn register_insert_query(reg_data: RegisterModel, pool: Arc<web::Data<Pool>>) ->
 
 #[derive(Debug, Deserialize, Serialize, Queryable)]
 pub struct FetchUserModel {
-    pub id: i32,
+    pub id: i64,
     pub name: String,
     pub created_at: chrono::NaiveDateTime,
-    pub balance: i32
+    pub balance: i64
 }
 
 pub fn get_user(
@@ -190,7 +195,7 @@ fn get_user_query(user_id: u32, pool: web::Data<Pool>) -> Result<FetchUserModel,
     use crate::schema::users::dsl::*;
     use std::convert::TryFrom;
 
-    let user_id = i32::try_from(user_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let user_id = i64::try_from(user_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
@@ -210,7 +215,7 @@ fn get_user_query(user_id: u32, pool: web::Data<Pool>) -> Result<FetchUserModel,
         .get_result::<FetchUserModel>(conn)
         .optional()
         .map_err(|db_err| EngineError::InternalError(format!("数据库查询失败：{}", db_err)))?
-        .ok_or_else(|| EngineError::BadRequest(format!("查询错误，没有该用户。")))
+        .ok_or_else(|| EngineError::NotFound(format!("查询错误，没有该用户。")))
 }
 
 //////////////////
@@ -258,9 +263,56 @@ fn get_user_by_name_query(user_name: String, pool: web::Data<Pool>) -> Result<Fe
         .get_result::<FetchUserModel>(conn)
         .optional()
         .map_err(|db_err| EngineError::InternalError(format!("数据库查询失败：{}", db_err)))?
-        .ok_or_else(|| EngineError::BadRequest(format!("查询错误，没有该用户。")))
+        .ok_or_else(|| EngineError::NotFound(format!("查询错误，没有该用户。")))
 }
 
+
+//////////////////
+
+pub fn get_user_me(
+    curr_user: RememberUserModel,
+    pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
+) -> impl Future<Item = HttpResponse, Error = EngineError> {
+
+    web::block(
+        move || {
+            get_user_me_query(curr_user, pool)
+        }
+    ).then(
+        move |res: Result<FetchUserModel, BlockingError<EngineError>>|
+            match res {
+                Ok(fetch_user_model) => Ok(HttpResponse::Ok().json(fetch_user_model)),
+                Err(err) => match err {
+                    BlockingError::Error(eng_err) => Err(eng_err),
+                    BlockingError::Canceled => Err(EngineError::InternalError("不明原因，内部请求被中断。服务端遇到错误。".to_owned()))
+                }
+            }
+    )
+}
+
+fn get_user_me_query(curr_user: RememberUserModel, pool: web::Data<Pool>) -> Result<FetchUserModel, EngineError> {
+    use crate::schema::users::dsl::*;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let query =
+            users
+                .filter(
+                    id.eq(curr_user.id)
+                )
+                .select(
+                    (id, name, created_at, balance)
+                );
+
+    debug!("User get self query by name SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+            
+    query
+        .get_result::<FetchUserModel>(conn)
+        .optional()
+        .map_err(|db_err| EngineError::InternalError(format!("数据库查询失败：{}", db_err)))?
+        .ok_or_else(|| EngineError::NotFound(format!("查询错误，没有该用户。")))
+}
 
 //////////////////
 
@@ -270,9 +322,10 @@ pub struct LoginModel {
     pub password: String
 }
 
-#[derive(Debug, Clone, Queryable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, Serialize, Deserialize, Identifiable)]
+#[table_name = "users"]
 pub struct RememberUserModel {
-    pub id: i32,
+    pub id: i64,
     pub name: String,
 }
 
@@ -358,7 +411,7 @@ pub struct TestAddingUserModel {
     pub password_hashed: String,
     pub name: String,
     pub created_at: chrono::NaiveDateTime,
-    pub balance: i32
+    pub balance: i64
 }
 
 #[test]

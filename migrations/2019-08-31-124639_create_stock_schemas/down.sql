@@ -2,9 +2,9 @@
 
 DROP TABLE deals;
 
-DROP TABLE user_bid_entrusts;
+DROP TABLE user_bid_orders;
 
-DROP TABLE user_ask_entrusts;
+DROP TABLE user_ask_orders;
 
 DROP TABLE new_stocks;
 
