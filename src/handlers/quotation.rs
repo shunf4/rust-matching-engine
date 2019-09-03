@@ -29,7 +29,7 @@ use crate::schema::*;
 
 use diesel::sql_types;
 
-#[derive(QueryableByName, Serialize)]
+#[derive(QueryableByName, Serialize, Deserialize)]
 pub struct TimeIntervalQuotationModel {
     #[sql_type = "sql_types::Timestamp"]
     pub time: chrono::NaiveDateTime,
@@ -37,7 +37,7 @@ pub struct TimeIntervalQuotationModel {
     pub price: Option<f32>,
 }
 
-#[derive(Queryable, Serialize)]
+#[derive(Queryable, Serialize, Deserialize)]
 pub struct RecentDealQuotationModel {
     pub id: i64,
     pub buy_user_id: i64,
@@ -47,7 +47,7 @@ pub struct RecentDealQuotationModel {
     pub created_at: chrono::NaiveDateTime
 }
 
-#[derive(QueryableByName, Serialize)]
+#[derive(QueryableByName, Serialize, Deserialize)]
 pub struct OrderByPriceModel {
     #[sql_type = "sql_types::Int4"]
     pub price: i32,
@@ -69,15 +69,49 @@ pub fn get_quotation(
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
     let stock_id = stock_id.into_inner();
-   
-    web::block(
-        move || {
-            get_quotation_query(stock_id, pool)
-        }
-    ).then(
-        move |res: Result<QuotationModel, BlockingError<EngineError>>|
+    use futures::future::join_all;
+
+    enum QueryType {
+        Time,
+        Deal,
+        Ask,
+        Bid
+    }
+
+    let get_block = |query: QueryType, pool: Pool| web::block(move || match query {
+        QueryType::Time => get_timequote_query(stock_id, pool),
+        QueryType::Deal => get_dealquote_query(stock_id, pool),
+        QueryType::Ask => get_askquote_query(stock_id, pool),
+        QueryType::Bid => get_bidquote_query(stock_id, pool)
+    }).from_err();
+
+    let pool = pool.into_inner();
+    let pool = pool.as_ref();
+
+    join_all(vec![
+        get_block(QueryType::Time, pool.clone()),
+        get_block(QueryType::Deal, pool.clone()),
+        get_block(QueryType::Ask, pool.clone()),
+        get_block(QueryType::Bid, pool.clone()),
+    ]).then(
+        move |res: Result<Vec<serde_json::Value>, BlockingError<EngineError>>|
             match res {
-                Ok(m) => Ok(HttpResponse::Ok().json(m)),
+                Ok(mut m) => Ok(HttpResponse::Ok().json(
+                    QuotationModel {
+                        time_quote: serde_json::from_value(m.remove(0)).map_err(|json_err| {
+                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                        })?,
+                        recent_deal: serde_json::from_value(m.remove(1)).map_err(|json_err| {
+                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                        })?,
+                        ask_prices: serde_json::from_value(m.remove(2)).map_err(|json_err| {
+                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                        })?,
+                        bid_prices: serde_json::from_value(m.remove(3)).map_err(|json_err| {
+                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                        })?
+                    }
+                )),
                 Err(err) => match err {
                     BlockingError::Error(eng_err) => Err(eng_err),
                     BlockingError::Canceled => Err(EngineError::InternalError("不明原因，内部请求被中断。服务端遇到错误。".to_owned()))
@@ -164,6 +198,140 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
         recent_deal: dealquotes,
         ask_prices: askquotes,
         bid_prices: bidquotes
+    })
+}
+
+fn get_timequote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::new_stocks::dsl as newdsl;
+    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
+
+    // 分时
+
+    let query = diesel::sql_query(include_str!("timequote.sql"))
+                    .bind::<sql_types::BigInt, _>(stock_id);
+
+    debug!("Get time quote SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    let model = query.load::<TimeIntervalQuotationModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error when getting timequote: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })?;
+
+    serde_json::to_value(model).map_err(|json_err| {
+        EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+    })
+}
+
+fn get_dealquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::new_stocks::dsl as newdsl;
+    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
+
+    // 最近交易
+
+    let query = dldsl::deals.filter(
+                    dldsl::stock_id.eq(stock_id).and(
+                        dldsl::sell_user_id.is_not_null()
+                    )
+                )
+                .order_by(dldsl::created_at.desc())
+                .select(
+                    (dldsl::id, dldsl::buy_user_id, dldsl::sell_user_id, dldsl::price, dldsl::amount, dldsl::created_at)
+                )
+                .limit(5);
+
+    debug!("Get deal quote SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    let model = query.get_results::<RecentDealQuotationModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error when getting timequote: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })?;
+
+    serde_json::to_value(model).map_err(|json_err| {
+        EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+    })
+}
+
+fn get_askquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::new_stocks::dsl as newdsl;
+    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
+
+    // 买卖委托
+
+    let query = diesel::sql_query(include_str!("askquote.sql"))
+                    .bind::<sql_types::BigInt, _>(stock_id);
+
+    debug!("Get ask quote SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    let model = query.load::<OrderByPriceModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error when getting askquote: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })?;
+
+    serde_json::to_value(model).map_err(|json_err| {
+        EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+    })
+}
+
+fn get_bidquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::new_stocks::dsl as newdsl;
+    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
+
+    let query = diesel::sql_query(include_str!("bidquote.sql"))
+                    .bind::<sql_types::BigInt, _>(stock_id);
+
+    debug!("Get bid quote SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    let model = query.load::<OrderByPriceModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error when getting bidquote: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })?;
+
+    serde_json::to_value(model).map_err(|json_err| {
+        EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
     })
 }
 

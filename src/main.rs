@@ -62,7 +62,7 @@ fn main() -> std::io::Result<()> {
 
         // 线程池
     let conn_man = ConnectionManager::<PgConnection>::new(database_url);
-    let pool = r2d2::Pool::builder().build(conn_man).expect("创建数据库连接线程池失败！");
+    let pool = r2d2::Pool::builder().build(conn_man).expect("创建数据库连接线程池失败，请检查 .env 文件或环境变量中的 DATABASE_URL 数据库地址，以及是否使用了 diesel migration run 或者 ！");
 
     // 创建在调试环境下可以即修改代码即重启的监听描述器，并创建 HTTP 服务器
 
