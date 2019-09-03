@@ -101,6 +101,11 @@ fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/stock-api/v1")
                     .service(
+                        web::resource("/")
+                            .route(web::get().to(|| web::HttpResponse::Ok().json("Hello"))
+                            .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+                    )
+                    .service(
                         handlers::users::make_scope()
                     )
                     .service(
