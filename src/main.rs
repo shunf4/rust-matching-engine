@@ -105,7 +105,9 @@ fn main() -> std::io::Result<()> {
                     )
                     .service(
                         web::resource("/auth")
+                            .route(web::get().to_async(handlers::users::get_user_me))
                             .route(web::post().to_async(handlers::users::login))
+                            .route(web::delete().to_async(handlers::users::logout))
                             .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
                     )
                     .service(

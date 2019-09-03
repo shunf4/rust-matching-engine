@@ -316,6 +316,15 @@ fn get_user_me_query(curr_user: RememberUserModel, pool: web::Data<Pool>) -> Res
 
 //////////////////
 
+pub fn logout(
+    iden: Identity,
+) -> impl Future<Item = HttpResponse, Error = EngineError> {
+    iden.forget();
+    futures::future::ok(HttpResponse::Ok().finish())
+}
+
+//////////////////
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct LoginModel {
     pub name: String,
