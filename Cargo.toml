@@ -1,5 +1,5 @@
 [package]
-name = "rust_matching_engine"
+name = "rust-matching-engine"
 version = "0.1.0"
 authors = ["shunf4 <shun1048576@gmail.com>"]
 edition = "2018"

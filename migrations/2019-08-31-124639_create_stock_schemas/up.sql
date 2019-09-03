@@ -30,6 +30,14 @@ CREATE TABLE user_stock (
     PRIMARY KEY (user_id, stock_id)
 );
 
+CREATE TABLE user_fav_stock (
+    user_id BIGSERIAL REFERENCES users(id),
+    stock_id BIGSERIAL REFERENCES stocks(id),
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (user_id, stock_id)
+);
+CREATE INDEX fav_index ON user_fav_stock(user_id, created_at);
+
 CREATE TABLE user_ask_orders ( -- 买入委托
     id BIGSERIAL PRIMARY KEY,
     user_id BIGSERIAL REFERENCES users(id),

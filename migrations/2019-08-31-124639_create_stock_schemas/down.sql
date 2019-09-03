@@ -10,6 +10,8 @@ DROP TABLE new_stocks;
 
 DROP TABLE user_stock;
 
+DROP TABLE user_fav_stock;
+
 DROP TABLE stocks;
 
 DROP TABLE users;

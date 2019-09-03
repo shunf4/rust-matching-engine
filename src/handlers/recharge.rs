@@ -23,7 +23,7 @@ use super::users::{RememberUserModel};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RechargeModel {
-    pub cash: u32,
+    pub cash: u64,
 }
 
 pub fn recharge(

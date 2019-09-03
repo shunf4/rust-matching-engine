@@ -171,7 +171,7 @@ pub struct FetchUserModel {
 }
 
 pub fn get_user(
-    user_id: web::Path<u32>,
+    user_id: web::Path<u64>,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
 
@@ -191,11 +191,11 @@ pub fn get_user(
     )
 }
 
-fn get_user_query(user_id: u32, pool: web::Data<Pool>) -> Result<FetchUserModel, EngineError> {
+fn get_user_query(user_id: u64, pool: web::Data<Pool>) -> Result<FetchUserModel, EngineError> {
     use crate::schema::users::dsl::*;
     use std::convert::TryFrom;
 
-    let user_id = i64::try_from(user_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let user_id = i64::try_from(user_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);

@@ -29,6 +29,11 @@ pub fn make_scope() -> actix_web::Scope {
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
         )
         .service(
+            web::resource("/prices")  // Scope 会自动加尾 /，所以 /stocks 无法匹配
+                .route(web::post().to_async(super::quotation::get_prices))     // 查询一系列股票的实时交易价格
+                .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+        )
+        .service(
             web::resource("/ipo/")  // Scope 会自动加尾 /，所以 /stocks 无法匹配
                 .route(web::get().to_async(get_ipo_stocks))     // 查询未上市股票
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
@@ -41,6 +46,11 @@ pub fn make_scope() -> actix_web::Scope {
         .service(
             web::resource("/my/ipo/")  // Scope 会自动加尾 /，所以 /stocks 无法匹配
                 .route(web::get().to_async(get_my_ipo_stocks))     // 查询自己的股票（未上市）
+                .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+        )
+        .service(
+            web::resource("/{id}/quotation")
+                .route(web::get().to_async(super::quotation::get_quotation))      // 查看行情
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
         )
         .service(
@@ -179,7 +189,7 @@ fn ipo_stock_query(ipo: IPOModel, user: RememberUserModel, pool: web::Data<Pool>
 
 
 pub fn list_stock(
-    stock_id: web::Path<u32>,
+    stock_id: web::Path<u64>,
     curr_user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -201,11 +211,11 @@ pub fn list_stock(
     )
 }
 
-fn list_stock_query(stock_id: u32, curr_user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
+fn list_stock_query(stock_id: u64, curr_user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl::*;
     use crate::schema::new_stocks::dsl::*;
 
-    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
@@ -250,11 +260,17 @@ fn list_stock_query(stock_id: u32, curr_user: RememberUserModel, pool: web::Data
 
 
 /////////////
+#[derive(Debug, Deserialize, Clone)]
+pub enum PagingOrder {
+    Alphabetical,
+    Latest
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PagingModel {
-    pub offset: Option<u32>,
-    pub limit: Option<u32>
+    pub offset: Option<u64>,
+    pub limit: Option<u64>,
+    pub order: Option<PagingOrder>
 }
 
 #[derive(Queryable, Serialize)]
@@ -508,7 +524,7 @@ fn get_my_ipo_stocks_query(paging: PagingModel, user: RememberUserModel, pool: w
 //////////////////
 
 pub fn get_stock(
-    stock_id: web::Path<u32>,
+    stock_id: web::Path<u64>,
     _: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -530,12 +546,12 @@ pub fn get_stock(
     )
 }
 
-fn get_stock_query(stock_id: u32, pool: web::Data<Pool>) -> Result<GetNewStockModel, EngineError> {
+fn get_stock_query(stock_id: u64, pool: web::Data<Pool>) -> Result<GetNewStockModel, EngineError> {
     use crate::schema::new_stocks::dsl::*;
     use crate::schema::stocks::dsl::*;
     use crate::schema::users::dsl::*;
 
-    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);

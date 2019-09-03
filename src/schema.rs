@@ -55,6 +55,14 @@ table! {
 }
 
 table! {
+    user_fav_stock (user_id, stock_id) {
+        user_id -> Int8,
+        stock_id -> Int8,
+        created_at -> Timestamp,
+    }
+}
+
+table! {
     users (id) {
         id -> Int8,
         password_hashed -> Varchar,
@@ -79,6 +87,8 @@ joinable!(user_ask_orders -> stocks (stock_id));
 joinable!(user_ask_orders -> users (user_id));
 joinable!(user_bid_orders -> stocks (stock_id));
 joinable!(user_bid_orders -> users (user_id));
+joinable!(user_fav_stock -> stocks (stock_id));
+joinable!(user_fav_stock -> users (user_id));
 joinable!(user_stock -> stocks (stock_id));
 joinable!(user_stock -> users (user_id));
 
@@ -88,6 +98,7 @@ allow_tables_to_appear_in_same_query!(
     stocks,
     user_ask_orders,
     user_bid_orders,
+    user_fav_stock,
     users,
     user_stock,
 );

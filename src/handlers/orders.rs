@@ -126,7 +126,7 @@ impl AskOrBidOrderModel for BidOrderModel {
 }
 
 ///////////////
-#[derive(Queryable, Insertable)]
+#[derive(Queryable, Insertable, Debug)]
 #[table_name="deals"]
 pub struct NewDeal {
     pub buy_user_id: i64,
@@ -368,6 +368,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                         amount: deal_amount,
                         created_at: chrono::Utc::now().naive_utc()
                     };
+                    debug!("Deal: {:?}", deal);
                     deal_num += deal_amount;
                     let give_seller_cash = deal_amount * (deal.price as i64);
                     let giveback_buyer_cash = deal_amount * ((new_ask.price - deal.price) as i64);
@@ -463,6 +464,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                         amount: deal_amount,
                         created_at: chrono::Utc::now().naive_utc()
                     };
+                    debug!("Deal: {:?}", deal);
                     deal_num += deal_amount;
                     let give_seller_cash = deal_amount * (deal.price as i64);
                     // let giveback_buyer_cash = 0;
@@ -664,7 +666,7 @@ fn get_my_bids_query(paging: PagingModel, user: RememberUserModel, pool: web::Da
 
 //////////////////
 pub fn get_ask(
-    ask_id: web::Path<u32>,
+    ask_id: web::Path<u64>,
     user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -686,7 +688,7 @@ pub fn get_ask(
     )
 }
 
-fn get_ask_query(ask_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
+fn get_ask_query(ask_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::user_stock::dsl as reldsl;
@@ -697,7 +699,7 @@ fn get_ask_query(ask_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Re
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let ask_id = i64::try_from(ask_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let ask_id = i64::try_from(ask_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     let query = askdsl::user_ask_orders
                     .inner_join(usrdsl::users)
@@ -733,7 +735,7 @@ fn get_ask_query(ask_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Re
 
 //////////////////
 pub fn get_bid(
-    bid_id: web::Path<u32>,
+    bid_id: web::Path<u64>,
     user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -755,7 +757,7 @@ pub fn get_bid(
     )
 }
 
-fn get_bid_query(bid_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
+fn get_bid_query(bid_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::user_stock::dsl as reldsl;
@@ -766,7 +768,7 @@ fn get_bid_query(bid_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Re
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let bid_id = i64::try_from(bid_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let bid_id = i64::try_from(bid_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     let query = biddsl::user_bid_orders
                     .inner_join(usrdsl::users)
@@ -802,7 +804,7 @@ fn get_bid_query(bid_id: u32, _: RememberUserModel, pool: web::Data<Pool>) -> Re
 
 //////////////////
 pub fn revoke_ask(
-    ask_id: web::Path<u32>,
+    ask_id: web::Path<u64>,
     user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -824,7 +826,7 @@ pub fn revoke_ask(
     )
 }
 
-fn revoke_ask_query(ask_id: u32, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
+fn revoke_ask_query(ask_id: u64, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::user_stock::dsl as reldsl;
@@ -835,7 +837,7 @@ fn revoke_ask_query(ask_id: u32, user: RememberUserModel, pool: web::Data<Pool>)
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let ask_id = i64::try_from(ask_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let ask_id = i64::try_from(ask_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     use diesel::pg::expression::array_comparison::AsArrayExpression;
 
@@ -902,7 +904,7 @@ fn revoke_ask_query(ask_id: u32, user: RememberUserModel, pool: web::Data<Pool>)
 
 //////////////////
 pub fn revoke_bid(
-    bid_id: web::Path<u32>,
+    bid_id: web::Path<u64>,
     user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -924,7 +926,7 @@ pub fn revoke_bid(
     )
 }
 
-fn revoke_bid_query(bid_id: u32, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
+fn revoke_bid_query(bid_id: u64, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::user_stock::dsl as reldsl;
@@ -935,7 +937,7 @@ fn revoke_bid_query(bid_id: u32, user: RememberUserModel, pool: web::Data<Pool>)
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let bid_id = i64::try_from(bid_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let bid_id = i64::try_from(bid_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     use diesel::pg::expression::array_comparison::AsArrayExpression;
 
@@ -1006,7 +1008,7 @@ pub struct IPOBuyModel {
 }
 
 pub fn ipo_buy(
-    stock_id: web::Path<u32>,
+    stock_id: web::Path<u64>,
     ipobuy: web::Json<IPOBuyModel>,
     curr_user: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
@@ -1036,7 +1038,7 @@ pub fn ipo_buy(
     )
 }
 
-fn ipo_buy_query(stock_id: u32, ipobuy: IPOBuyModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<i64, EngineError> {
+fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<i64, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
@@ -1048,7 +1050,7 @@ fn ipo_buy_query(stock_id: u32, ipobuy: IPOBuyModel, user: RememberUserModel, po
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 32 字节有符号整数：{}。", try_err)))?;
+    let stock_id = i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 
     let amount = i64::try_from(ipobuy.amount).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?;
 

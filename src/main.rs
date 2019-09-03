@@ -87,7 +87,7 @@ fn main() -> std::io::Result<()> {
                     EngineError::BadRequest(format!("解析传来的 JSON 数据错误：{}。请检查数据。", err)).into()
                 })
             }))   // 给 Json parser 添加配置
-            .data(web::Path::<u32>::configure(|cfg| {
+            .data(web::Path::<u64>::configure(|cfg| {
                 cfg.error_handler(|err, _| {
                     EngineError::BadRequest(format!("解析路径中整数错误：{}。请检查数据。", err)).into()
                 })
@@ -106,6 +106,9 @@ fn main() -> std::io::Result<()> {
                         web::resource("/auth")
                             .route(web::post().to_async(handlers::users::login))
                             .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+                    )
+                    .service(
+                        handlers::favorite::make_scope()
                     )
                     .service(
                         handlers::stocks::make_scope()
