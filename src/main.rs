@@ -55,6 +55,7 @@ fn main() -> std::io::Result<()> {
         "1",
     );
     env_logger::init();
+    let listen_host_port = std::env::var("LISTEN_HOST_PORT").unwrap_or("0.0.0.0:7878".to_owned());
 
     // 初始化数据库连接
     let database_url = std::env::var("DATABASE_URL").expect("必须设置环境变量（也可在 .env 中填写） DATABASE_URL=PostgreSQL数据库连接URL！");
@@ -130,7 +131,7 @@ fn main() -> std::io::Result<()> {
     server = if let Some(l) = listenfd.take_tcp_listener(0).unwrap() {
         server.listen(l).unwrap()
     } else {
-        server.bind("0.0.0.0:7878").unwrap()
+        server.bind(listen_host_port).unwrap()
     };
 
     server.run()
