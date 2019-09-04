@@ -294,7 +294,7 @@ pub fn get_stocks(
             get_stocks_query(paging, pool)
         }
     ).then(
-        move |res: Result<Vec<GetStockModel>, BlockingError<EngineError>>|
+        move |res: Result<Vec<GetNewStockModel>, BlockingError<EngineError>>|
             match res {
                 Ok(stocks) => Ok(HttpResponse::Ok().json(stocks)),
                 Err(err) => match err {
@@ -305,26 +305,27 @@ pub fn get_stocks(
     )
 }
 
-fn get_stocks_query(paging: PagingModel, pool: web::Data<Pool>) -> Result<Vec<GetStockModel>, EngineError> {
+fn get_stocks_query(paging: PagingModel, pool: web::Data<Pool>) -> Result<Vec<GetNewStockModel>, EngineError> {
     use crate::schema::stocks::dsl::*;
     use crate::schema::users::dsl::*;
+    use crate::schema::new_stocks::dsl::*;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let query = stocks.filter(
+    let query = new_stocks.inner_join(users).inner_join(stocks).filter(
                     into_market.eq(true)
                 )
                     .order(into_market_at.desc())
                     .offset(paging.offset.unwrap_or(0).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
                     .limit(paging.limit.unwrap_or(10).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
                     .select(
-                        (crate::schema::stocks::dsl::id, crate::schema::stocks::dsl::name, into_market_at)
+                        (crate::schema::stocks::dsl::id, crate::schema::users::dsl::name.nullable(), crate::schema::stocks::dsl::name, into_market, into_market_at, offer_circ.nullable(), offer_price.nullable(), offer_unfulfilled.nullable(), crate::schema::new_stocks::dsl::created_at.nullable())
                     );
 
     debug!("Get stocks SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
-    query.get_results::<GetStockModel>(conn)
+    query.get_results::<GetNewStockModel>(conn)
         .map_err(|db_err| {
             debug!("Database query error when getting stocks: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
@@ -424,7 +425,7 @@ pub fn get_my_stocks(
             get_my_stocks_query(paging, user, pool)
         }
     ).then(
-        move |res: Result<Vec<Stock>, BlockingError<EngineError>>|
+        move |res: Result<Vec<GetNewStockModel>, BlockingError<EngineError>>|
             match res {
                 Ok(stocks) => Ok(HttpResponse::Ok().json(stocks)),
                 Err(err) => match err {
@@ -435,33 +436,29 @@ pub fn get_my_stocks(
     )
 }
 
-fn get_my_stocks_query(paging: PagingModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<Stock>, EngineError> {
+fn get_my_stocks_query(paging: PagingModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<GetNewStockModel>, EngineError> {
     use crate::schema::new_stocks::dsl::*;
     use crate::schema::stocks::dsl::*;
+    use crate::schema::users::dsl::*;
 
     // 取出数据库连接
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
-    let query = stocks.inner_join(new_stocks).filter(
+    let query = new_stocks.inner_join(users).inner_join(stocks).filter(
                     into_market.eq(true).and(
                         issuer_id.eq(user.id)
                     )
                 )
-                    .select(
-                        (
-                            crate::schema::stocks::dsl::id,
-                            name,
-                            into_market,
-                            into_market_at
-                        )
-                    )
                     .order(into_market_at.desc())
                     .offset(paging.offset.unwrap_or(0).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
-                    .limit(paging.limit.unwrap_or(10).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?);
+                    .limit(paging.limit.unwrap_or(10).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
+                    .select(
+                        (crate::schema::stocks::dsl::id, crate::schema::users::dsl::name.nullable(), crate::schema::stocks::dsl::name, into_market, into_market_at, offer_circ.nullable(), offer_price.nullable(), offer_unfulfilled.nullable(), crate::schema::new_stocks::dsl::created_at.nullable())
+                    );
 
     debug!("Get my stocks SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
-    query.get_results::<Stock>(conn)
+    query.get_results::<GetNewStockModel>(conn)
         .map_err(|db_err| {
             debug!("Database query error when getting stocks: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
