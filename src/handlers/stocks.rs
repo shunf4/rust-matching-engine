@@ -221,10 +221,12 @@ fn list_stock_query(stock_id: u64, curr_user: RememberUserModel, pool: web::Data
     let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
 
     // 第一步：验证此 stock 是用户本人发行
-    let query_target = new_stocks
+    let query_target = stocks.inner_join(new_stocks)
                             .filter(
                                 crate::schema::new_stocks::dsl::id.eq(stock_id).and(
                                     issuer_id.eq(curr_user.id)
+                                ).and(
+                                    into_market.eq(false)
                                 )
                             );
     let query_check_issuer = query_target.select(crate::schema::new_stocks::dsl::id);
