@@ -5,7 +5,7 @@ FROM (
 		query_stock_id,
 		t1.*
 	FROM
-	unnest( ? ) WITH ORDINALITY AS query(query_stock_id, ordinality)
+	unnest( $1 ) WITH ORDINALITY AS query(query_stock_id, ordinality)
 	LEFT JOIN
 	(
 		SELECT
@@ -18,7 +18,7 @@ FROM (
 				)
 			AS ts
 		FROM deals
-		WHERE deals.stock_id = ANY( ? )
+		WHERE deals.stock_id = ANY( $2 )
 	) AS t1
 	ON t1.stock_id = query_stock_id
 	ORDER BY ordinality

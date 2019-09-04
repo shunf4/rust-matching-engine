@@ -380,7 +380,8 @@ fn get_prices_query(stock_ids: Vec<u64>, pool: web::Data<Pool>) -> Result<Vec<Pr
     let stock_ids = stock_ids.into_iter().map(|stock_id| i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))).collect::<Result<Vec<i64>, EngineError>>()?;
 
     let query = diesel::sql_query(include_str!("latestdeal.sql"))
-                    .bind::<sql_types::Array<sql_types::BigInt>, _>(stock_ids);
+                    .bind::<sql_types::Array<sql_types::BigInt>, _>(&stock_ids)
+                    .bind::<sql_types::Array<sql_types::BigInt>, _>(&stock_ids);
 
     debug!("Get prices SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
