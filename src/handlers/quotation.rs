@@ -338,8 +338,8 @@ fn get_bidquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, En
 //////////
 #[derive(QueryableByName, Serialize)]
 pub struct PriceModel {
-    #[sql_type = "sql_types::Int4"]
-    pub price: i32,
+    #[sql_type = "sql_types::Nullable<sql_types::Int4>"]
+    pub price: Option<i32>,
 }
 
 pub fn get_prices(
