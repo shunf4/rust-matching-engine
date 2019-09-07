@@ -26,6 +26,7 @@ use super::users::{RememberUserModel};
 use super::PagingModel;
 
 use crate::schema::*;
+use diesel::sql_types;
 
 pub fn make_scope() -> actix_web::Scope {
     web::scope("/orders")
@@ -80,7 +81,8 @@ pub struct AskOrderModel {
     pub price: i32,
     pub volume: i64,
     pub unfulfilled: i64,
-    pub created_at: chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 trait AskOrBidOrderModel {
@@ -96,7 +98,8 @@ impl AskOrBidOrderModel for AskOrderModel {
             price: model.price,
             volume: model.volume,
             unfulfilled: model.volume,
-            created_at: chrono::Utc::now().naive_utc()
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc()
         }
     }
 }
@@ -109,7 +112,8 @@ pub struct BidOrderModel {
     pub price: i32,
     pub volume: i64,
     pub unfulfilled: i64,
-    pub created_at: chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 impl AskOrBidOrderModel for BidOrderModel {
@@ -120,7 +124,8 @@ impl AskOrBidOrderModel for BidOrderModel {
             price: model.price,
             volume: model.volume,
             unfulfilled: model.volume,
-            created_at: chrono::Utc::now().naive_utc()
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc()
         }
     }
 }
@@ -139,11 +144,12 @@ pub struct NewDeal {
 
 #[derive(Queryable, Insertable, AsChangeset, Identifiable)]
 #[primary_key(user_id, stock_id)]
-#[table_name="user_stock"]
+#[table_name="user_hold_stock"]
 pub struct UserStockRel {
     pub user_id: i64,
     pub stock_id: i64,
-    pub hold: i64
+    pub hold: i64,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 #[derive(Serialize, Debug)]
@@ -194,7 +200,7 @@ pub fn new_order(
 fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<i64, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -217,7 +223,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
         query_stock.get_result::<i64>(conn)
             .optional()
             .map_err(|db_err| {
-                debug!("Database query error when ordering: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库查询错误：{}", db_err))
             })?
             .ok_or_else(|| EngineError::BadRequest(format!("该股票还未上市！")))?;
@@ -233,7 +239,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
 
                 let user_after = query.get_result::<User>(conn)
                     .map_err(|db_err| {
-                        debug!("Database update error when freeze: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库更新余额错误：{}", db_err))
                     })?;
 
@@ -251,19 +257,20 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                 }
             },
             AskOrBid::Bid => {
-                let query = diesel::update(reldsl::user_stock.find(
+                let query = diesel::update(reldsl::user_hold_stock.find(
                                 (user.id, order.stock_id)
                             ))
-                            .set(
-                                reldsl::hold.eq(reldsl::hold - order.volume)
-                            );
+                            .set((
+                                reldsl::hold.eq(reldsl::hold - order.volume),
+                                reldsl::updated_at.eq(chrono::Utc::now().naive_utc())
+                            ));
 
                 debug!("New freeze stock query SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
                 let rel_after = query.get_result::<UserStockRel>(conn)
                     .optional()
                     .map_err(|db_err| {
-                        debug!("Database update error when freeze: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库更新股票持有量错误：{}", db_err))
                     })?
                     .ok_or_else(|| {
@@ -300,13 +307,13 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
         match order.entype {
             AskOrBid::Ask => {
                 let query = diesel::insert_into(askdsl::user_ask_orders)
-                    .values(new_ask);
+                    .values(AskOrderModel::from_order_model_and_user(&order, &user));
 
                 debug!("New order query SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
                 new_ask = Some(query.get_result::<AskOrder>(conn)
                     .map_err(|db_err| {
-                        debug!("Database insert error when order: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库插入委托错误：{}", db_err))
                     })?);
 
@@ -315,13 +322,13 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
             },
             AskOrBid::Bid => {
                 let query = diesel::insert_into(biddsl::user_bid_orders)
-                    .values(new_bid);
+                    .values(BidOrderModel::from_order_model_and_user(&order, &user));
 
                 debug!("New order query SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
                 new_bid = Some(query.get_result::<BidOrder>(conn)
                     .map_err(|db_err| {
-                        debug!("Database insert error when order: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库插入委托错误：{}", db_err))
                     })?);
             }
@@ -350,7 +357,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
 
                 let mut bids = query.get_results::<BidOrder>(conn)
                     .map_err(|db_err| {
-                        debug!("Database query error when getting bid order: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库查询卖出委托错误：{}", db_err))
                     })?;
 
@@ -359,7 +366,9 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                 for bid in &mut bids {
                     let deal_amount = std::cmp::min(bid.unfulfilled, new_ask.unfulfilled);
                     new_ask.unfulfilled -= deal_amount;
+                    new_ask.updated_at = chrono::Utc::now().naive_utc();
                     bid.unfulfilled -= deal_amount;
+                    bid.updated_at = chrono::Utc::now().naive_utc();
                     let deal = NewDeal {
                         buy_user_id: new_ask.user_id,
                         sell_user_id: Some(bid.user_id),
@@ -374,47 +383,51 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                     let giveback_buyer_cash = deal_amount * ((new_ask.price - deal.price) as i64);
                     
                     new_ask.save_changes::<AskOrder>(conn).map_err(|db_err| {
-                            debug!("Database query error when saving new ask: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设新买委托错误：{}", db_err))
                         })?;
                     bid.save_changes::<BidOrder>(conn).map_err(|db_err| {
-                            debug!("Database query error when saving old bid: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设旧卖委托错误：{}", db_err))
                         })?;
                     diesel::update(usrdsl::users.find(deal.buy_user_id))
                         .set(usrdsl::balance.eq(usrdsl::balance + giveback_buyer_cash))
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when setting buyer balance: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设买家余额错误：{}", db_err))
                         })?;
                     diesel::update(usrdsl::users.find(bid.user_id))
                         .set(usrdsl::balance.eq(usrdsl::balance + give_seller_cash))
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when setting seller balance: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设卖家余额错误：{}", db_err))
                         })?;
                     diesel::insert_into(dldsl::deals).values(&deal)
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when inserting deal: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库插入交易错误：{}", db_err))
                         })?;
-                    diesel::insert_into(reldsl::user_stock)
+                    diesel::insert_into(reldsl::user_hold_stock)
                         .values(
                             UserStockRel {
                                 user_id: deal.buy_user_id,
                                 stock_id: deal.stock_id,
-                                hold: deal.amount
+                                hold: deal.amount,
+                                updated_at: chrono::Utc::now().naive_utc()
                             }
                         )
                         .on_conflict((reldsl::user_id, reldsl::stock_id))
                         .do_update()
-                        .set(reldsl::hold.eq(reldsl::hold + deal.amount))
+                        .set((
+                            reldsl::hold.eq(reldsl::hold + deal.amount),
+                            reldsl::updated_at.eq(chrono::Utc::now().naive_utc())
+                        ))
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when inserting or updating hold: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设买家股票数量错误：{}", db_err))
                         })?;
 
@@ -446,7 +459,7 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
 
                 let mut asks = query.get_results::<AskOrder>(conn)
                     .map_err(|db_err| {
-                        debug!("Database query error when getting ask order: {}", db_err);
+                        debug!("Database query error: {}", db_err);
                         EngineError::InternalError(format!("数据库查询查找委托错误：{}", db_err))
                     })?;
 
@@ -455,7 +468,9 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                 for ask in &mut asks {
                     let deal_amount = std::cmp::min(ask.unfulfilled, new_bid.unfulfilled);
                     new_bid.unfulfilled -= deal_amount;
+                    new_bid.updated_at = chrono::Utc::now().naive_utc();
                     ask.unfulfilled -= deal_amount;
+                    ask.updated_at = chrono::Utc::now().naive_utc();
                     let deal = NewDeal {
                         buy_user_id: ask.user_id,
                         sell_user_id: Some(new_bid.user_id),
@@ -470,40 +485,44 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
                     // let giveback_buyer_cash = 0;
                     
                     new_bid.save_changes::<BidOrder>(conn).map_err(|db_err| {
-                            debug!("Database query error when saving new ask: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设新卖委托错误：{}", db_err))
                         })?;
                     ask.save_changes::<AskOrder>(conn).map_err(|db_err| {
-                            debug!("Database query error when saving new ask: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设旧买委托错误：{}", db_err))
                         })?;
                     diesel::update(usrdsl::users.find(new_bid.user_id))
                         .set(usrdsl::balance.eq(usrdsl::balance + give_seller_cash))
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when setting seller balance: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设卖家余额错误：{}", db_err))
                         })?;
                     diesel::insert_into(dldsl::deals).values(&deal)
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when inserting deal: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库插入交易错误：{}", db_err))
                         })?;
-                    diesel::insert_into(reldsl::user_stock)
+                    diesel::insert_into(reldsl::user_hold_stock)
                         .values(
                             UserStockRel {
                                 user_id: deal.buy_user_id,
                                 stock_id: deal.stock_id,
-                                hold: deal.amount
+                                hold: deal.amount,
+                                updated_at: chrono::Utc::now().naive_utc()
                             }
                         )
                         .on_conflict((reldsl::user_id, reldsl::stock_id))
                         .do_update()
-                        .set(reldsl::hold.eq(reldsl::hold + deal.amount))
+                        .set((
+                            reldsl::hold.eq(reldsl::hold + deal.amount),
+                            reldsl::updated_at.eq(chrono::Utc::now().naive_utc())
+                        ))
                         .execute(conn)
                         .map_err(|db_err| {
-                            debug!("Database query error when inserting or updating hold: {}", db_err);
+                            debug!("Database query error: {}", db_err);
                             EngineError::InternalError(format!("数据库重设买家股票数量错误：{}", db_err))
                         })?;
 
@@ -526,12 +545,15 @@ fn new_order_query(order: OrderModel, user: RememberUserModel, pool: web::Data<P
 #[derive(Serialize, Debug, Queryable)]
 pub struct ReturnOrderModel {
     pub id: i64,
+    pub user_id: i64,
     pub user_name: String,
+    pub stock_id: i64,
     pub stock_name: String,
     pub price: i32,
     pub volume: i64,
     pub unfulfilled: i64,
-    pub created_at: chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 pub fn get_my_asks(
@@ -560,7 +582,7 @@ pub fn get_my_asks(
 fn get_my_asks_query(paging: PagingModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<ReturnOrderModel>, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -579,13 +601,16 @@ fn get_my_asks_query(paging: PagingModel, user: RememberUserModel, pool: web::Da
                     .limit(paging.limit.unwrap_or(10).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
                     .select(
                         (
+                            askdsl::id,
                             usrdsl::id,
                             usrdsl::name,
+                            stkdsl::id,
                             stkdsl::name,
                             askdsl::price,
                             askdsl::volume,
                             askdsl::unfulfilled,
-                            askdsl::created_at
+                            askdsl::created_at,
+                            askdsl::updated_at
                         )
                     );
 
@@ -593,7 +618,7 @@ fn get_my_asks_query(paging: PagingModel, user: RememberUserModel, pool: web::Da
 
     query.get_results::<ReturnOrderModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting my asks: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })
 }
@@ -625,7 +650,7 @@ pub fn get_my_bids(
 fn get_my_bids_query(paging: PagingModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<ReturnOrderModel>, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -644,13 +669,16 @@ fn get_my_bids_query(paging: PagingModel, user: RememberUserModel, pool: web::Da
                     .limit(paging.limit.unwrap_or(10).try_into().map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
                     .select(
                         (
+                            biddsl::id,
                             usrdsl::id,
                             usrdsl::name,
+                            stkdsl::id,
                             stkdsl::name,
                             biddsl::price,
                             biddsl::volume,
                             biddsl::unfulfilled,
-                            biddsl::created_at
+                            biddsl::created_at,
+                            biddsl::updated_at
                         )
                     );
 
@@ -658,7 +686,7 @@ fn get_my_bids_query(paging: PagingModel, user: RememberUserModel, pool: web::Da
 
     query.get_results::<ReturnOrderModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting my bids: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })
 }
@@ -691,7 +719,7 @@ pub fn get_ask(
 fn get_ask_query(ask_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -709,13 +737,16 @@ fn get_ask_query(ask_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Re
                     )
                     .select(
                         (
+                            askdsl::id,
                             usrdsl::id,
                             usrdsl::name,
+                            stkdsl::id,
                             stkdsl::name,
                             askdsl::price,
                             askdsl::volume,
                             askdsl::unfulfilled,
-                            askdsl::created_at
+                            askdsl::created_at,
+                            askdsl::updated_at
                         )
                     );
 
@@ -724,11 +755,11 @@ fn get_ask_query(ask_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Re
     query.get_result::<ReturnOrderModel>(conn)
         .optional()
         .map_err(|db_err| {
-            debug!("Database query error when getting my asks: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?
         .ok_or_else(|| {
-            EngineError::NotFound(format!("未找到请求的股票。"))
+            EngineError::NotFound(format!("未找到请求的委托。"))
         })
 }
 
@@ -760,7 +791,7 @@ pub fn get_bid(
 fn get_bid_query(bid_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Result<ReturnOrderModel, EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -778,13 +809,16 @@ fn get_bid_query(bid_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Re
                     )
                     .select(
                         (
+                            biddsl::id,
                             usrdsl::id,
                             usrdsl::name,
+                            stkdsl::id,
                             stkdsl::name,
                             biddsl::price,
                             biddsl::volume,
                             biddsl::unfulfilled,
-                            biddsl::created_at
+                            biddsl::created_at,
+                            biddsl::updated_at
                         )
                     );
 
@@ -793,11 +827,11 @@ fn get_bid_query(bid_id: u64, _: RememberUserModel, pool: web::Data<Pool>) -> Re
     query.get_result::<ReturnOrderModel>(conn)
         .optional()
         .map_err(|db_err| {
-            debug!("Database query error when getting my bids: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?
         .ok_or_else(|| {
-            EngineError::NotFound(format!("未找到请求的股票。"))
+            EngineError::NotFound(format!("未找到请求的委托。"))
         })
 }
 
@@ -829,7 +863,7 @@ pub fn revoke_ask(
 fn revoke_ask_query(ask_id: u64, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -858,7 +892,7 @@ fn revoke_ask_query(ask_id: u64, user: RememberUserModel, pool: web::Data<Pool>)
                 .get_result(conn)
                 .optional()
                 .map_err(|db_err| {
-                    debug!("Database query error when getting ask: {}", db_err);
+                    debug!("Database query error: {}", db_err);
                     EngineError::InternalError(format!("数据库查询错误：{}", db_err))
                 })?
                 .ok_or_else(|| {
@@ -872,7 +906,7 @@ fn revoke_ask_query(ask_id: u64, user: RememberUserModel, pool: web::Data<Pool>)
 
         let affected_rows = query.execute(conn)
             .map_err(|db_err| {
-                debug!("Database update error when revoke: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库更新余额错误：{}", db_err))
             })?;
 
@@ -888,7 +922,7 @@ fn revoke_ask_query(ask_id: u64, user: RememberUserModel, pool: web::Data<Pool>)
 
         let affected_rows = query.execute(conn)
             .map_err(|db_err| {
-                debug!("Database delete error when revoking: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库删除委托错误：{}", db_err))
             })?;
 
@@ -929,7 +963,7 @@ pub fn revoke_bid(
 fn revoke_bid_query(bid_id: u64, user: RememberUserModel, pool: web::Data<Pool>) -> Result<(), EngineError> {
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -957,21 +991,24 @@ fn revoke_bid_query(bid_id: u64, user: RememberUserModel, pool: web::Data<Pool>)
                 .get_result(conn)
                 .optional()
                 .map_err(|db_err| {
-                    debug!("Database query error when getting bid: {}", db_err);
+                    debug!("Database query error: {}", db_err);
                     EngineError::InternalError(format!("数据库查询错误：{}", db_err))
                 })?
                 .ok_or_else(|| {
                     EngineError::NotFound(format!("未找到请求的委托。"))
                 })?;
 
-        let query = diesel::update(reldsl::user_stock.find((user.id, stock_id)))
-                        .set(reldsl::hold.eq(reldsl::hold + bid_unful));
+        let query = diesel::update(reldsl::user_hold_stock.find((user.id, stock_id)))
+                        .set((
+                            reldsl::hold.eq(reldsl::hold + bid_unful),
+                            reldsl::updated_at.eq(chrono::Utc::now().naive_utc())
+                        ));
 
         debug!("New refund stock query SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
         let affected_rows = query.execute(conn)
             .map_err(|db_err| {
-                debug!("Database update error when revoke: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库更新股票持有量错误：{}", db_err))
             })?;
 
@@ -987,7 +1024,7 @@ fn revoke_bid_query(bid_id: u64, user: RememberUserModel, pool: web::Data<Pool>)
 
         let affected_rows = query.execute(conn)
             .map_err(|db_err| {
-                debug!("Database delete error when revoking: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库删除委托错误：{}", db_err))
             })?;
 
@@ -1042,7 +1079,7 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -1069,7 +1106,7 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
         query_stock.get_result::<i64>(conn)
             .optional()
             .map_err(|db_err| {
-                debug!("Database query error when ipobuy: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库查询错误：{}", db_err))
             })?
             .ok_or_else(|| EngineError::BadRequest(format!("没有该股票或该股票已经上市，不能再 IPO 买入！")))?;
@@ -1083,7 +1120,7 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
         let mut new_stock = target_ipo.get_result::<NewStock>(conn)
             .optional()
             .map_err(|db_err| {
-                debug!("Database query error when ipobuy: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库查询错误：{}", db_err))
             })?
             .ok_or_else(|| EngineError::InternalError(format!("该股票没有新股发行信息，请联系管理员维护！")))?;
@@ -1092,7 +1129,7 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
 
         new_stock.offer_unfulfilled -= effective_amount;
         new_stock.save_changes::<NewStock>(conn).map_err(|db_err| {
-            debug!("Database query error when saving new_stock: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库重设 IPO 发行余量错误：{}", db_err))
         })?;
 
@@ -1105,7 +1142,7 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
 
         let user_after = query_charge.get_result::<User>(conn)
             .map_err(|db_err| {
-                debug!("Database update error when charging: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库更新余额错误：{}", db_err))
             })?;
 
@@ -1136,27 +1173,107 @@ fn ipo_buy_query(stock_id: u64, ipobuy: IPOBuyModel, user: RememberUserModel, po
         diesel::insert_into(dldsl::deals).values(&deal)
             .execute(conn)
             .map_err(|db_err| {
-                debug!("Database query error when inserting deal: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库插入交易错误：{}", db_err))
             })?;
 
-        diesel::insert_into(reldsl::user_stock)
+        diesel::insert_into(reldsl::user_hold_stock)
             .values(
                 UserStockRel {
                     user_id: deal.buy_user_id,
                     stock_id: deal.stock_id,
-                    hold: deal.amount
+                    hold: deal.amount,
+                    updated_at: chrono::Utc::now().naive_utc()
                 }
             )
             .on_conflict((reldsl::user_id, reldsl::stock_id))
             .do_update()
-            .set(reldsl::hold.eq(reldsl::hold + deal.amount))
+            .set((
+                reldsl::hold.eq(reldsl::hold + deal.amount),
+                reldsl::updated_at.eq(chrono::Utc::now().naive_utc())
+            ))
             .execute(conn)
             .map_err(|db_err| {
-                debug!("Database query error when inserting or updating hold: {}", db_err);
+                debug!("Database query error: {}", db_err);
                 EngineError::InternalError(format!("数据库重设买家股票数量错误：{}", db_err))
             })?;
 
         Ok(effective_amount)
     })
+}
+
+
+
+//////////////////
+#[derive(QueryableByName, Serialize, Deserialize)]
+pub struct DealModel {
+    #[sql_type = "sql_types::BigInt"]
+    pub id: i64,
+    #[sql_type = "sql_types::BigInt"]
+    pub stock_id: i64,
+    #[sql_type = "sql_types::Varchar"]
+    pub stock_name: String,
+    #[sql_type = "sql_types::BigInt"]
+    pub buy_user_id: i64,
+    #[sql_type = "sql_types::Varchar"]
+    pub buy_user_name: String,
+    #[sql_type = "sql_types::Nullable<sql_types::BigInt>"]
+    pub sell_user_id: Option<i64>,  // 当是 NULL 时，表示是购买发行新股
+    #[sql_type = "sql_types::Nullable<sql_types::Varchar>"]
+    pub sell_user_name: Option<String>,
+    #[sql_type = "sql_types::Int4"]
+    pub price: i32,
+    #[sql_type = "sql_types::Int8"]
+    pub amount: i64,
+    #[sql_type = "sql_types::Timestamp"]
+    pub created_at: chrono::NaiveDateTime
+}
+
+
+pub fn get_my_deals(
+    paging: web::Query<PagingModel>,
+    user: RememberUserModel,
+    pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
+) -> impl Future<Item = HttpResponse, Error = EngineError> {
+    let paging = paging.into_inner();
+   
+    web::block(
+        move || {
+            get_my_deals_query(paging, user, pool)
+        }
+    ).then(
+        move |res: Result<Vec<DealModel>, BlockingError<EngineError>>|
+            match res {
+                Ok(stocks) => Ok(HttpResponse::Ok().json(stocks)),
+                Err(err) => match err {
+                    BlockingError::Error(eng_err) => Err(eng_err),
+                    BlockingError::Canceled => Err(EngineError::InternalError("不明原因，内部请求被中断。服务端遇到错误。".to_owned()))
+                }
+            }
+    )
+}
+
+fn get_my_deals_query(paging: PagingModel, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<DealModel>, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let query = diesel::sql_query(include_str!("mydeals.sql"))
+                    .bind::<sql_types::BigInt, _>(user.id)
+                    .bind::<sql_types::Int8, _>(i64::try_from(paging.offset.unwrap_or(0)).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?)
+                    .bind::<sql_types::Int8, _>(i64::try_from(paging.limit.unwrap_or(10)).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))?);
+
+    debug!("Get my deals SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    query.load::<DealModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })
 }

@@ -18,7 +18,8 @@ FROM (
 				)
 			AS ts
 		FROM deals
-		WHERE deals.stock_id = ANY( $2 )
+		WHERE deals.stock_id = ANY( $1 )
+			AND deals.sell_user_id IS NOT NULL
 	) AS t1
 	ON t1.stock_id = query_stock_id
 	ORDER BY ordinality

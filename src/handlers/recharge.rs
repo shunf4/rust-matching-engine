@@ -64,7 +64,7 @@ fn recharge_query(recharge: RechargeModel, user: RememberUserModel, pool: web::D
     query.get_result::<User>(conn)
         .optional()
         .map_err(|db_err| {
-            debug!("Database update error when recharging: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库更新用户余额错误：{}", db_err))
         })?
         .ok_or_else(|| EngineError::InternalError(format!("未找到当前登录的用户")))?;

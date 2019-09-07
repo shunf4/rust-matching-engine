@@ -33,8 +33,8 @@ use diesel::sql_types;
 pub struct TimeIntervalQuotationModel {
     #[sql_type = "sql_types::Timestamp"]
     pub time: chrono::NaiveDateTime,
-    #[sql_type = "sql_types::Nullable<sql_types::Float>"]
-    pub price: Option<f32>,
+    #[sql_type = "sql_types::Nullable<sql_types::Double>"]
+    pub price: Option<f64>,
 }
 
 #[derive(Queryable, Serialize, Deserialize)]
@@ -49,10 +49,10 @@ pub struct RecentDealQuotationModel {
 
 #[derive(QueryableByName, Serialize, Deserialize)]
 pub struct OrderByPriceModel {
-    #[sql_type = "sql_types::Int4"]
-    pub price: i32,
     #[sql_type = "sql_types::Int8"]
     pub amount: i64,
+    #[sql_type = "sql_types::Int4"]
+    pub price: i32,
 }
 
 #[derive(Serialize)]
@@ -96,20 +96,26 @@ pub fn get_quotation(
     ]).then(
         move |res: Result<Vec<serde_json::Value>, BlockingError<EngineError>>|
             match res {
-                Ok(mut m) => Ok(HttpResponse::Ok().json(
-                    QuotationModel {
-                        time_quote: serde_json::from_value(m.remove(0)).map_err(|json_err| {
-                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
-                        })?,
-                        recent_deal: serde_json::from_value(m.remove(1)).map_err(|json_err| {
-                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
-                        })?,
-                        ask_prices: serde_json::from_value(m.remove(2)).map_err(|json_err| {
-                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
-                        })?,
-                        bid_prices: serde_json::from_value(m.remove(3)).map_err(|json_err| {
-                            EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
-                        })?
+                Ok(mut m) => Ok(HttpResponse::Ok().json({
+                        //debug!("{:?}", &m);
+                        let bid_prices = serde_json::from_value(m.pop().unwrap()).map_err(|json_err| {
+                                EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                            })?;
+                        let ask_prices = serde_json::from_value(m.pop().unwrap()).map_err(|json_err| {
+                                EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                            })?;
+                        let recent_deal = serde_json::from_value(m.pop().unwrap()).map_err(|json_err| {
+                                EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                            })?;
+                        let time_quote = serde_json::from_value(m.pop().unwrap()).map_err(|json_err| {
+                                EngineError::InternalError(format!("内部 JSON 转换错误：{}", json_err))
+                            })?;
+                        QuotationModel {
+                            time_quote,
+                            recent_deal,
+                            ask_prices,
+                            bid_prices
+                        }
                     }
                 )),
                 Err(err) => match err {
@@ -124,7 +130,7 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -143,7 +149,7 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
 
     let timequotes = query.load::<TimeIntervalQuotationModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting timequote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -164,7 +170,7 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
 
     let dealquotes = query.get_results::<RecentDealQuotationModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting timequote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -177,7 +183,7 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
 
     let askquotes = query.load::<OrderByPriceModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting askquote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -189,7 +195,7 @@ fn get_quotation_query(stock_id: u64, pool: web::Data<Pool>) -> Result<Quotation
 
     let bidquotes = query.load::<OrderByPriceModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting bidquote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -205,7 +211,7 @@ fn get_timequote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, E
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -224,7 +230,7 @@ fn get_timequote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, E
 
     let model = query.load::<TimeIntervalQuotationModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting timequote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -237,7 +243,7 @@ fn get_dealquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, E
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -264,7 +270,7 @@ fn get_dealquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, E
 
     let model = query.get_results::<RecentDealQuotationModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting timequote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -277,7 +283,7 @@ fn get_askquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, En
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -296,7 +302,7 @@ fn get_askquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, En
 
     let model = query.load::<OrderByPriceModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting askquote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -309,7 +315,7 @@ fn get_bidquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, En
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -326,7 +332,7 @@ fn get_bidquote_query(stock_id: u64, pool: Pool) -> Result<serde_json::Value, En
 
     let model = query.load::<OrderByPriceModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting bidquote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })?;
 
@@ -343,7 +349,7 @@ pub struct PriceModel {
 }
 
 pub fn get_prices(
-    stock_ids: web::Json<Vec<u64>>,
+    stock_ids: web::Path<String>,
     _: RememberUserModel,
     pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
 ) -> impl Future<Item = HttpResponse, Error = EngineError> {
@@ -351,6 +357,7 @@ pub fn get_prices(
    
     web::block(
         move || {
+            let stock_ids: Vec<u64> = serde_json::from_str(&stock_ids[..]).map_err(|json_err| EngineError::BadRequest(format!("解析股票 ID 列表错误：{}", json_err)))?;
             get_prices_query(stock_ids, pool)
         }
     ).then(
@@ -369,7 +376,7 @@ fn get_prices_query(stock_ids: Vec<u64>, pool: web::Data<Pool>) -> Result<Vec<Pr
     use crate::schema::stocks::dsl as stkdsl;
     use crate::schema::users::dsl as usrdsl;
     use crate::schema::new_stocks::dsl as newdsl;
-    use crate::schema::user_stock::dsl as reldsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
     use crate::schema::deals::dsl as dldsl;
     use crate::schema::user_ask_orders::dsl as askdsl;
     use crate::schema::user_bid_orders::dsl as biddsl;
@@ -380,14 +387,13 @@ fn get_prices_query(stock_ids: Vec<u64>, pool: web::Data<Pool>) -> Result<Vec<Pr
     let stock_ids = stock_ids.into_iter().map(|stock_id| i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))).collect::<Result<Vec<i64>, EngineError>>()?;
 
     let query = diesel::sql_query(include_str!("latestdeal.sql"))
-                    .bind::<sql_types::Array<sql_types::BigInt>, _>(&stock_ids)
                     .bind::<sql_types::Array<sql_types::BigInt>, _>(&stock_ids);
 
     debug!("Get prices SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
 
     query.load::<PriceModel>(conn)
         .map_err(|db_err| {
-            debug!("Database query error when getting timequote: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库查询错误：{}", db_err))
         })
 }

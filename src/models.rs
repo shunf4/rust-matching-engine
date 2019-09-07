@@ -76,7 +76,8 @@ pub struct AskOrder {
     pub price: i32,
     pub volume: i64,
     pub unfulfilled: i64,
-    pub created_at: chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 impl AskOrder {
@@ -94,7 +95,8 @@ pub struct BidOrder {
     pub price: i32,
     pub volume: i64,
     pub unfulfilled: i64,
-    pub created_at: chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime
 }
 
 impl BidOrder {

@@ -45,15 +45,20 @@ pub fn test_get_data_connection() -> PgConnection {
 fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();    // 引入本目录下 .env 文件作为环境变量
 
-    // 初始化日志
-    std::env::set_var(
-        "RUST_LOG",
-        "rust_matching_engine=debug,actix_web=debug,actix_server=debug",
-    );
-    std::env::set_var(
-        "RUST_BACKTRACE",
-        "1",
-    );
+    // 初始化环境变量和日志
+    if let Err(_) = std::env::var("RUST_LOG") {
+        std::env::set_var(
+            "RUST_LOG",
+            "rust_matching_engine=debug,actix_web=debug,actix_server=debug",
+        );
+    }
+
+    if let Err(_) = std::env::var("RUST_BACKTRACE") {
+        std::env::set_var(
+            "RUST_BACKTRACE",
+            "1",
+        );
+    }
     env_logger::init();
     let listen_host_port = std::env::var("LISTEN_HOST_PORT").unwrap_or("0.0.0.0:7878".to_owned());
 
@@ -116,10 +121,15 @@ fn main() -> std::io::Result<()> {
                             .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
                     )
                     .service(
-                        handlers::favorite::make_scope()
+                        handlers::stocks::make_scope()
                     )
                     .service(
-                        handlers::stocks::make_scope()
+                        handlers::orders::make_scope()
+                    )
+                    .service(
+                        web::resource("/deals/my/deals/")
+                            .route(web::get().to_async(handlers::orders::get_my_deals))
+                            .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
                     )
                     .service(
                         web::resource("/recharge")

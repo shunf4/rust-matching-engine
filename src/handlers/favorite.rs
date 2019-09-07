@@ -26,6 +26,7 @@ use super::users::{RememberUserModel};
 use super::PagingModel;
 
 use crate::schema::*;
+use diesel::sql_types;
 
 pub fn make_scope() -> actix_web::Scope {
     web::scope("/favorites")
@@ -33,6 +34,11 @@ pub fn make_scope() -> actix_web::Scope {
             web::resource("/")  // Scope 会自动加尾 /，所以 /favorites 无法匹配
                 .route(web::get().to_async(get_favorites))   // 获取收藏列表
                 .route(web::post().to_async(add_favorite))   // 新增收藏
+                .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
+        )
+        .service(
+            web::resource("/{ids}/is_favorited")
+                .route(web::get().to_async(get_is_favorited))     // 删除收藏
                 .to(|| Err::<(), EngineError>(EngineError::MethodNotAllowed(format!("错误：不允许此 HTTP 谓词。"))))
         )
         .service(
@@ -94,7 +100,7 @@ fn add_favorite_query(stock_id: u64, curr_user: RememberUserModel, pool: web::Da
 
     query.execute(conn)
         .map_err(|db_err| {
-            debug!("Database insert error when addfav: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库插入收藏错误：{}", db_err))
         })?;
 
@@ -145,7 +151,7 @@ fn delete_favorite_query(stock_id: u64, curr_user: RememberUserModel, pool: web:
 
     let affecting_rows = query.execute(conn)
         .map_err(|db_err| {
-            debug!("Database delete error when delfav: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库插入收藏错误：{}", db_err))
         })?;
 
@@ -228,4 +234,62 @@ fn get_favorites_query(paging: PagingModel, user: RememberUserModel, pool: web::
                 .map_err(|db_err| EngineError::InternalError(format!("数据库查询失败：{}", db_err)))
         }
     }
+}
+
+/////////////
+#[derive(QueryableByName, Serialize)]
+pub struct IsFavoritedModel {
+    #[sql_type = "sql_types::Bool"]
+    pub is_favorited: bool
+}
+
+pub fn get_is_favorited(
+    stock_ids: web::Path<String>,
+    user: RememberUserModel,
+    pool: web::Data<Pool>   // 此处将之前附加到应用的数据库连接取出
+) -> impl Future<Item = HttpResponse, Error = EngineError> {
+    let stock_ids = stock_ids.into_inner();
+   
+    web::block(
+        move || {
+            let stock_ids: Vec<u64> = serde_json::from_str(&stock_ids[..]).map_err(|json_err| EngineError::BadRequest(format!("解析股票 ID 列表错误：{}", json_err)))?;
+            get_is_favorited_query(stock_ids, user, pool)
+        }
+    ).then(
+        move |res: Result<Vec<IsFavoritedModel>, BlockingError<EngineError>>|
+            match res {
+                Ok(stocks) => Ok(HttpResponse::Ok().json(stocks)),
+                Err(err) => match err {
+                    BlockingError::Error(eng_err) => Err(eng_err),
+                    BlockingError::Canceled => Err(EngineError::InternalError("不明原因，内部请求被中断。服务端遇到错误。".to_owned()))
+                }
+            }
+    )
+}
+
+fn get_is_favorited_query(stock_ids: Vec<u64>, user: RememberUserModel, pool: web::Data<Pool>) -> Result<Vec<IsFavoritedModel>, EngineError> {
+    use crate::schema::stocks::dsl as stkdsl;
+    use crate::schema::users::dsl as usrdsl;
+    use crate::schema::new_stocks::dsl as newdsl;
+    use crate::schema::user_hold_stock::dsl as reldsl;
+    use crate::schema::deals::dsl as dldsl;
+    use crate::schema::user_ask_orders::dsl as askdsl;
+    use crate::schema::user_bid_orders::dsl as biddsl;
+
+    // 取出数据库连接
+    let conn : &PgConnection = &*(pool.get().map_err(|pool_err| EngineError::InternalError(format!("服务端遇到错误，无法取得与数据库的连接：{}。", pool_err)))?);
+
+    let stock_ids = stock_ids.into_iter().map(|stock_id| i64::try_from(stock_id).map_err(|try_err| EngineError::InternalError(format!("输入的整数太大，无法安全转为 64 字节有符号整数：{}。", try_err)))).collect::<Result<Vec<i64>, EngineError>>()?;
+
+    let query = diesel::sql_query(include_str!("isfavorited.sql"))
+                    .bind::<sql_types::Array<sql_types::BigInt>, _>(&stock_ids)
+                    .bind::<sql_types::BigInt, _>(&user.id);
+
+    debug!("Get is_favorited SQL: {}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+    query.load::<IsFavoritedModel>(conn)
+        .map_err(|db_err| {
+            debug!("Database query error: {}", db_err);
+            EngineError::InternalError(format!("数据库查询错误：{}", db_err))
+        })
 }

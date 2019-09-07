@@ -155,7 +155,7 @@ fn register_insert_query(reg_data: RegisterModel, pool: Arc<web::Data<Pool>>) ->
 
     query.get_result::<User>(conn)
         .map_err(|db_err| {
-            debug!("Database insert error when registering: {}", db_err);
+            debug!("Database query error: {}", db_err);
             EngineError::InternalError(format!("数据库插入错误：{}", db_err))
         }).map(|_| ())
 }
