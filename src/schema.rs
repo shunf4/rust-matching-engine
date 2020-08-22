@@ -63,20 +63,20 @@ table! {
 }
 
 table! {
+    user_stock (user_id, stock_id) {
+        user_id -> Int8,
+        stock_id -> Int8,
+        hold -> Int8,
+    }
+}
+
+table! {
     users (id) {
         id -> Int8,
         password_hashed -> Varchar,
         name -> Varchar,
         created_at -> Timestamp,
         balance -> Int8,
-    }
-}
-
-table! {
-    user_stock (user_id, stock_id) {
-        user_id -> Int8,
-        stock_id -> Int8,
-        hold -> Int8,
     }
 }
 
@@ -99,6 +99,6 @@ allow_tables_to_appear_in_same_query!(
     user_ask_orders,
     user_bid_orders,
     user_fav_stock,
-    users,
     user_stock,
+    users,
 );
