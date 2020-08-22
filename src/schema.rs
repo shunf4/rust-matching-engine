@@ -39,6 +39,7 @@ table! {
         volume -> Int8,
         unfulfilled -> Int8,
         created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -51,6 +52,7 @@ table! {
         volume -> Int8,
         unfulfilled -> Int8,
         created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -63,10 +65,11 @@ table! {
 }
 
 table! {
-    user_stock (user_id, stock_id) {
+    user_hold_stock (user_id, stock_id) {
         user_id -> Int8,
         stock_id -> Int8,
         hold -> Int8,
+        updated_at -> Timestamp,
     }
 }
 
@@ -89,8 +92,8 @@ joinable!(user_bid_orders -> stocks (stock_id));
 joinable!(user_bid_orders -> users (user_id));
 joinable!(user_fav_stock -> stocks (stock_id));
 joinable!(user_fav_stock -> users (user_id));
-joinable!(user_stock -> stocks (stock_id));
-joinable!(user_stock -> users (user_id));
+joinable!(user_hold_stock -> stocks (stock_id));
+joinable!(user_hold_stock -> users (user_id));
 
 allow_tables_to_appear_in_same_query!(
     deals,
@@ -99,6 +102,6 @@ allow_tables_to_appear_in_same_query!(
     user_ask_orders,
     user_bid_orders,
     user_fav_stock,
-    user_stock,
+    user_hold_stock,
     users,
 );

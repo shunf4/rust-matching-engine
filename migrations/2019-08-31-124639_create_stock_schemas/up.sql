@@ -23,10 +23,11 @@ CREATE TABLE new_stocks (
     created_at TIMESTAMP NOT NULL
 );
 
-CREATE TABLE user_stock (
+CREATE TABLE user_hold_stock (
     user_id BIGSERIAL REFERENCES users(id),
     stock_id BIGSERIAL REFERENCES stocks(id),
     hold BIGINT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (user_id, stock_id)
 );
 
@@ -45,7 +46,8 @@ CREATE TABLE user_ask_orders ( -- 买入委托
     price INTEGER NOT NULL,
     volume BIGINT NOT NULL,
     unfulfilled BIGINT NOT NULL,
-    created_at TIMESTAMP NOT NULL
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX ask_orders_index ON user_ask_orders(stock_id, price, created_at, unfulfilled);
 
@@ -56,7 +58,8 @@ CREATE TABLE user_bid_orders ( -- 卖出委托
     price INTEGER NOT NULL,
     volume BIGINT NOT NULL,
     unfulfilled BIGINT NOT NULL,
-    created_at TIMESTAMP NOT NULL
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX bid_orders_index ON user_bid_orders(stock_id, price, created_at, unfulfilled);
 

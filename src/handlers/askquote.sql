@@ -3,12 +3,11 @@ SELECT
     user_ask_orders.price AS price
 FROM user_ask_orders
 WHERE
-    user_ask_orders.stock_id = ?
+    user_ask_orders.stock_id = $1
         AND
     user_ask_orders.unfulfilled != 0
 GROUP BY
     user_ask_orders.price
 ORDER BY
     user_ask_orders.price DESC
-LIMIT 5
-;
+LIMIT 5;

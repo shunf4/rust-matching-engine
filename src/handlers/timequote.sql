@@ -1,4 +1,4 @@
-SELECT t1.ts as time, SUM(price*amount)::FLOAT/SUM(amount) as price
+SELECT t1.ts as time, SUM(price*amount)::DOUBLE PRECISION/SUM(amount) as price
 FROM
 generate_series(
     DATE_TRUNC('minute', CURRENT_TIMESTAMP) - INTERVAL '30 minutes',
@@ -9,5 +9,5 @@ LEFT JOIN deals
 ON
     t1.ts = DATE_TRUNC('minute', deals.created_at)
         AND
-    stock_id = ?
-GROUP BY t1.ts
+    stock_id = $1
+GROUP BY t1.ts;
